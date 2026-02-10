@@ -23,7 +23,7 @@ resources:
             notebook_path: ../deployment/batch_inference/notebooks/BatchInference.py
             base_parameters:
               env: ${bundle.target}
-              input_table_name: ${bundle.target}.boq_mlops.feature_store_inference_input  # TODO: create input table for inference
+              input_table_name: ${var.catalog_name}.boq_mlops.feature_store_inference_input  # TODO: create input table for inference
               output_table_name: ${var.catalog_name}.boq_mlops.predictions
               model_name: ${var.catalog_name}.boq_mlops.${var.model_name}
               # git source information of current ML resource deployment. It will be persisted as part of the workflow run
