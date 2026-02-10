@@ -28,14 +28,13 @@ include:
 
 # Deployment Target specific values for workspace
 targets:
-  dev:  # UC Catalog Name 
+  dev:  # UC Catalog Name
     mode: development
     default: true
     variables:
-      catalog_name: dev
+      catalog_name: ananyaroy
     workspace:
-      # TODO: add dev workspace URL
-      host:
+      host: https://e2-demo-field-eng.cloud.databricks.com
 
   staging:
     variables:
