@@ -112,13 +112,14 @@ mlflow.set_registry_uri('databricks-uc')
 # COMMAND ----------
 
 # DBTITLE 1, Load training data and target
-# Load account master data
-account_data = spark.table(training_data_path)
+# Load only account_id from account master (features will come from Feature Store)
+account_data = spark.table(training_data_path).select("account_id")
 
 # Load target table (contains default_12m labels)
 target_data = spark.table(target_table_path)
 
 # Join account data with target
+# The base dataframe should only contain account_id and target - all features come from Feature Store
 training_data = account_data.join(target_data, on="account_id", how="inner")
 
 print(f"Training data shape: {training_data.count()} rows")
