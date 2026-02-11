@@ -18,6 +18,10 @@
 
 # COMMAND ----------
 
+
+
+# COMMAND ----------
+
 # MAGIC %load_ext autoreload
 # MAGIC %autoreload 2
 
@@ -189,7 +193,7 @@ mlflow.end_run()
 mlflow.start_run()
 
 # Columns to exclude from training (IDs, dates, etc.)
-exclude_columns = ["account_open_date", "bank"]
+exclude_columns = ["account_id","account_open_date", "bank"]
 
 fe = FeatureEngineeringClient()
 
