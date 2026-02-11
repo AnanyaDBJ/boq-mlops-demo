@@ -17,12 +17,12 @@ resources:
       model:
         name: ${var.model_name}
         catalog_name: ${var.catalog_name}
-        schema_name: boq_mlops
-        comment: Registered model in Unity Catalog for the "boq_mlops_project" ML Project for ${bundle.target} deployment target.
+        schema_name: ${var.schema_name}
+        comment: Home Loan Default Prediction Model (12-month PD) for BOQ/ME Bank - ${bundle.target} environment.
         <<: *grants
 
   experiments:
     experiment:
       name: ${var.experiment_name}
       <<: *permissions
-      description: MLflow Experiment used to track runs for boq_mlops_project project.
+      description: MLflow Experiment for Home Loan Default Prediction (boq-loan-mlops project).

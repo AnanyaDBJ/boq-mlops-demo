@@ -15,7 +15,7 @@ common_permissions: &permissions
 resources:
   jobs:
     batch_inference_job:
-      name: ${bundle.target}-boq_mlops_project-batch-inference-job
+      name: ${bundle.target}-boq-loan-mlops-batch-inference-job
       tasks:
         - task_key: batch_inference_job
           <<: *new_cluster
@@ -23,9 +23,9 @@ resources:
             notebook_path: ../deployment/batch_inference/notebooks/BatchInference.py
             base_parameters:
               env: ${bundle.target}
-              input_table_name: ${var.catalog_name}.boq_mlops.feature_store_inference_input  # TODO: create input table for inference
-              output_table_name: ${var.catalog_name}.boq_mlops.predictions
-              model_name: ${var.catalog_name}.boq_mlops.${var.model_name}
+              input_table_name: ${var.catalog_name}.${var.schema_name}.new_loan_applications  # TODO: create input table for inference
+              output_table_name: ${var.catalog_name}.${var.schema_name}.loan_default_predictions
+              model_name: ${var.catalog_name}.${var.schema_name}.${var.model_name}
               # git source information of current ML resource deployment. It will be persisted as part of the workflow run
               git_source_info: url:${bundle.git.origin_url}; branch:${bundle.git.branch}; commit:${bundle.git.commit}
 

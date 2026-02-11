@@ -14,44 +14,54 @@ common_permissions: &permissions
 
 resources:
   jobs:
-    write_feature_table_job:
-      name: ${bundle.target}-boq_mlops_project-write-feature-table-job
+    feature_engineering_job:
+      name: ${bundle.target}-boq-loan-mlops-feature-engineering-job
       job_clusters:
-        - job_cluster_key: write_feature_table_job_cluster
+        - job_cluster_key: feature_engineering_job_cluster
           <<: *new_cluster
       tasks:
-        - task_key: PickupFeatures
-          job_cluster_key: write_feature_table_job_cluster
+        - task_key: AccountFeatures
+          job_cluster_key: feature_engineering_job_cluster
           notebook_task:
             notebook_path: ../feature_engineering/notebooks/GenerateAndWriteFeatures.py
             base_parameters:
-              # TODO modify these arguments to reflect your setup.
-              input_table_path: /databricks-datasets/nyctaxi-with-zipcodes/subsampled
-              # TODO: Empty start/end dates will process the whole range. Update this as needed to process recent data.
+              input_table_path: ${var.catalog_name}.${var.schema_name}.account_master
               input_start_date: ""
               input_end_date: ""
-              timestamp_column: tpep_pickup_datetime
-              output_table_name: ${var.catalog_name}.boq_mlops.trip_pickup_features
-              features_transform_module: pickup_features
-              primary_keys: zip
-              # git source information of current ML resource deployment. It will be persisted as part of the workflow run
+              timestamp_column: ""
+              output_table_name: ${var.catalog_name}.${var.schema_name}.account_features
+              features_transform_module: account_features
+              primary_keys: account_id
               git_source_info: url:${bundle.git.origin_url}; branch:${bundle.git.branch}; commit:${bundle.git.commit}
-        - task_key: DropoffFeatures
-          job_cluster_key: write_feature_table_job_cluster
+
+        - task_key: DelinquencyFeatures
+          job_cluster_key: feature_engineering_job_cluster
           notebook_task:
             notebook_path: ../feature_engineering/notebooks/GenerateAndWriteFeatures.py
             base_parameters:
-              # TODO: modify these arguments to reflect your setup.
-              input_table_path: /databricks-datasets/nyctaxi-with-zipcodes/subsampled
-              # TODO: Empty start/end dates will process the whole range. Update this as needed to process recent data.
+              input_table_path: ${var.catalog_name}.${var.schema_name}.delinquency_history
               input_start_date: ""
               input_end_date: ""
-              timestamp_column: tpep_dropoff_datetime
-              output_table_name: ${var.catalog_name}.boq_mlops.trip_dropoff_features
-              features_transform_module: dropoff_features
-              primary_keys: zip
-              # git source information of current ML resource deployment. It will be persisted as part of the workflow run
+              timestamp_column: ""
+              output_table_name: ${var.catalog_name}.${var.schema_name}.delinquency_features
+              features_transform_module: delinquency_features
+              primary_keys: account_id
               git_source_info: url:${bundle.git.origin_url}; branch:${bundle.git.branch}; commit:${bundle.git.commit}
+
+        - task_key: PaymentFeatures
+          job_cluster_key: feature_engineering_job_cluster
+          notebook_task:
+            notebook_path: ../feature_engineering/notebooks/GenerateAndWriteFeatures.py
+            base_parameters:
+              input_table_path: ${var.catalog_name}.${var.schema_name}.payment_behavior
+              input_start_date: ""
+              input_end_date: ""
+              timestamp_column: ""
+              output_table_name: ${var.catalog_name}.${var.schema_name}.payment_features
+              features_transform_module: payment_features
+              primary_keys: account_id
+              git_source_info: url:${bundle.git.origin_url}; branch:${bundle.git.branch}; commit:${bundle.git.commit}
+
       schedule:
         quartz_cron_expression: "0 0 7 * * ?" # daily at 7am
         timezone_id: UTC

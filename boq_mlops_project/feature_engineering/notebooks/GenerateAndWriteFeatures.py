@@ -3,12 +3,12 @@
 # Generate and Write Features Notebook
 #
 # This notebook can be used to generate and write features to a Databricks Feature Store table.
-# It is configured and can be executed as the tasks in the write_feature_table_job workflow defined under
+# It is configured and can be executed as the tasks in the feature_engineering_job workflow defined under
 # ``boq_mlops_project/resources/feature-engineering-workflow-resource.yml``
 #
 # Parameters:
 #
-# * input_table_path (required)   - Path to input data.
+# * input_table_path (required)   - Path to input data table.
 # * output_table_name (required)  - Fully qualified schema + Delta table name for the feature table where the features
 # *                                 will be written to. Note that this will create the Feature table if it does not
 # *                                 exist.
@@ -26,10 +26,10 @@
 # List of input args needed to run this notebook as a job.
 # Provide them via DB widgets or notebook arguments.
 #
-# A Hive-registered Delta table containing the input data.
+# Unity Catalog table containing the input data.
 dbutils.widgets.text(
     "input_table_path",
-    "/databricks-datasets/nyctaxi-with-zipcodes/subsampled",
+    "ananyaroy.boq_mlops.account_master",
     label="Input Table Name",
 )
 # Input start date.
@@ -37,26 +37,26 @@ dbutils.widgets.text("input_start_date", "", label="Input Start Date")
 # Input end date.
 dbutils.widgets.text("input_end_date", "", label="Input End Date")
 # Timestamp column. Will be used to filter input start/end dates.
-# This column is also used as a timestamp key of the feature table.
+# This column is also used as a timestamp key of the feature table (optional for loan features).
 dbutils.widgets.text(
-    "timestamp_column", "tpep_pickup_datetime", label="Timestamp column"
+    "timestamp_column", "", label="Timestamp column"
 )
 
 # Feature table to store the computed features.
 dbutils.widgets.text(
     "output_table_name",
-    "dev.boq_mlops.trip_pickup_features",
+    "ananyaroy.boq_mlops.account_features",
     label="Output Feature Table Name",
 )
 
 # Feature transform module name.
 dbutils.widgets.text(
-    "features_transform_module", "pickup_features", label="Features transform file."
+    "features_transform_module", "account_features", label="Features transform file."
 )
 # Primary Keys columns for the feature table;
 dbutils.widgets.text(
     "primary_keys",
-    "zip",
+    "account_id",
     label="Primary keys columns for the feature table, comma separated.",
 )
 
@@ -92,7 +92,8 @@ spark.sql("CREATE DATABASE IF NOT EXISTS " + output_database)
 # COMMAND ----------
 
 # DBTITLE 1, Read input data.
-raw_data = spark.read.format("delta").load(input_table_path)
+# Read from Unity Catalog table
+raw_data = spark.table(input_table_path)
 
 # COMMAND ----------
 
@@ -119,12 +120,22 @@ fe = FeatureEngineeringClient()
 
 # Create the feature table if it does not exist first.
 # Note that this is a no-op if a table with the same name and schema already exists.
-fe.create_table(
-    name=output_table_name,    
-    primary_keys=[x.strip() for x in pk_columns.split(",")] + [ts_column],  # Include timeseries column in primary_keys
-    timestamp_keys=[ts_column],
-    df=features_df,
-)
+# For loan features: timestamp_keys are optional (account features don't have timestamps)
+if ts_column and ts_column != "":
+    # Time-series features (delinquency, payment history)
+    fe.create_table(
+        name=output_table_name,
+        primary_keys=[x.strip() for x in pk_columns.split(",")],
+        timestamp_keys=[ts_column],
+        df=features_df,
+    )
+else:
+    # Static features (account characteristics)
+    fe.create_table(
+        name=output_table_name,
+        primary_keys=[x.strip() for x in pk_columns.split(",")],
+        df=features_df,
+    )
 
 # Write the computed features dataframe.
 fe.write_table(

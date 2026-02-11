@@ -2,16 +2,18 @@
 ##################################################################################
 # Model Training Notebook using Databricks Feature Store
 #
-# This notebook shows an example of a Model Training pipeline using Databricks Feature Store tables.
+# This notebook shows an example of a Model Training pipeline for Home Loan Default Prediction
+# using Databricks Feature Store tables.
 # It is configured and can be executed as the "Train" task in the model_training_job workflow defined under
 # ``boq_mlops_project/resources/model-workflow-resource.yml``
 #
 # Parameters:
 # * env (required):                 - Environment the notebook is run in (staging, or prod). Defaults to "staging".
-# * training_data_path (required)   - Path to the training data.
+# * training_data_path (required)   - Path to the training data table.
+# * target_table_path (required)    - Path to the target table containing default labels.
 # * experiment_name (required)      - MLflow experiment name for the training runs. Will be created if it doesn't exist.
-# * model_name (required)           - Three-level name (<catalog>.<schema>.<model_name>) to register the trained model in Unity Catalog. 
-#  
+# * model_name (required)           - Three-level name (<catalog>.<schema>.<model_name>) to register the trained model in Unity Catalog.
+#
 ##################################################################################
 
 # COMMAND ----------
@@ -43,44 +45,59 @@ dbutils.library.restartPython()
 dbutils.widgets.dropdown("env", "staging", ["staging", "prod"], "Environment Name")
 env = dbutils.widgets.get("env")
 
-# Path to the Hive-registered Delta table containing the training data.
+# Path to the Unity Catalog table containing the account data.
 dbutils.widgets.text(
     "training_data_path",
-    "/databricks-datasets/nyctaxi-with-zipcodes/subsampled",
+    "ananyaroy.boq_mlops.account_master",
     label="Path to the training data",
+)
+
+# Path to the target table containing default labels
+dbutils.widgets.text(
+    "target_table_path",
+    "ananyaroy.boq_mlops.target",
+    label="Path to the target table",
 )
 
 # MLflow experiment name.
 dbutils.widgets.text(
     "experiment_name",
-    f"/dev-boq_mlops_project-experiment",
+    f"/dev-boq-loan-mlops-experiment",
     label="MLflow experiment name",
 )
 
 
 # Unity Catalog registered model name to use for the trained mode.
 dbutils.widgets.text(
-    "model_name", "dev.boq_mlops.boq_mlops_project-model", label="Full (Three-Level) Model Name"
+    "model_name", "ananyaroy.boq_mlops.boq-loan-default-model", label="Full (Three-Level) Model Name"
 )
 
-# Pickup features table name
+# Account features table name
 dbutils.widgets.text(
-    "pickup_features_table",
-    "dev.boq_mlops.trip_pickup_features",
-    label="Pickup Features Table",
+    "account_features_table",
+    "ananyaroy.boq_mlops.account_features",
+    label="Account Features Table",
 )
 
-# Dropoff features table name
+# Delinquency features table name
 dbutils.widgets.text(
-    "dropoff_features_table",
-    "dev.boq_mlops.trip_dropoff_features",
-    label="Dropoff Features Table",
+    "delinquency_features_table",
+    "ananyaroy.boq_mlops.delinquency_features",
+    label="Delinquency Features Table",
+)
+
+# Payment features table name
+dbutils.widgets.text(
+    "payment_features_table",
+    "ananyaroy.boq_mlops.payment_features",
+    label="Payment Features Table",
 )
 
 # COMMAND ----------
 
 # DBTITLE 1,Define input and output variables
-input_table_path = dbutils.widgets.get("training_data_path")
+training_data_path = dbutils.widgets.get("training_data_path")
+target_table_path = dbutils.widgets.get("target_table_path")
 experiment_name = dbutils.widgets.get("experiment_name")
 model_name = dbutils.widgets.get("model_name")
 
@@ -94,57 +111,24 @@ mlflow.set_registry_uri('databricks-uc')
 
 # COMMAND ----------
 
-# DBTITLE 1, Load raw data
-raw_data = spark.read.format("delta").load(input_table_path)
-raw_data.display()
+# DBTITLE 1, Load training data and target
+# Load account master data
+account_data = spark.table(training_data_path)
+
+# Load target table (contains default_12m labels)
+target_data = spark.table(target_table_path)
+
+# Join account data with target
+training_data = account_data.join(target_data, on="account_id", how="inner")
+
+print(f"Training data shape: {training_data.count()} rows")
+training_data.display()
 
 # COMMAND ----------
 
 # DBTITLE 1, Helper functions
-from datetime import timedelta, timezone
-import math
 import mlflow.pyfunc
-import pyspark.sql.functions as F
-from pyspark.sql.types import IntegerType
-
-
-def rounded_unix_timestamp(dt, num_minutes=15):
-    """
-    Ceilings datetime dt to interval num_minutes, then returns the unix timestamp.
-    """
-    nsecs = dt.minute * 60 + dt.second + dt.microsecond * 1e-6
-    delta = math.ceil(nsecs / (60 * num_minutes)) * (60 * num_minutes) - nsecs
-    return int((dt + timedelta(seconds=delta)).replace(tzinfo=timezone.utc).timestamp())
-
-
-rounded_unix_timestamp_udf = F.udf(rounded_unix_timestamp, IntegerType())
-
-
-def rounded_taxi_data(taxi_data_df):
-    # Round the taxi data timestamp to 15 and 30 minute intervals so we can join with the pickup and dropoff features
-    # respectively.
-    taxi_data_df = (
-        taxi_data_df.withColumn(
-            "rounded_pickup_datetime",
-            F.to_timestamp(
-                rounded_unix_timestamp_udf(
-                    taxi_data_df["tpep_pickup_datetime"], F.lit(15)
-                )
-            ),
-        )
-        .withColumn(
-            "rounded_dropoff_datetime",
-            F.to_timestamp(
-                rounded_unix_timestamp_udf(
-                    taxi_data_df["tpep_dropoff_datetime"], F.lit(30)
-                )
-            ),
-        )
-        .drop("tpep_pickup_datetime")
-        .drop("tpep_dropoff_datetime")
-    )
-    taxi_data_df.createOrReplaceTempView("taxi_data")
-    return taxi_data_df
+from mlflow.tracking import MlflowClient
 
 
 def get_latest_model_version(model_name):
@@ -159,37 +143,35 @@ def get_latest_model_version(model_name):
 
 # COMMAND ----------
 
-# DBTITLE 1, Read taxi data for training
-taxi_data = rounded_taxi_data(raw_data)
-taxi_data.display()
-
-# COMMAND ----------
-
 # DBTITLE 1, Create FeatureLookups
 from databricks.feature_engineering import FeatureLookup
 import mlflow
 
-pickup_features_table = dbutils.widgets.get("pickup_features_table")
-dropoff_features_table = dbutils.widgets.get("dropoff_features_table")
+account_features_table = dbutils.widgets.get("account_features_table")
+delinquency_features_table = dbutils.widgets.get("delinquency_features_table")
+payment_features_table = dbutils.widgets.get("payment_features_table")
 
-pickup_feature_lookups = [
+# Account-level features (static characteristics)
+account_feature_lookups = [
     FeatureLookup(
-        table_name=pickup_features_table,
-        feature_names=[
-            "mean_fare_window_1h_pickup_zip",
-            "count_trips_window_1h_pickup_zip",
-        ],
-        lookup_key=["pickup_zip"],
-        timestamp_lookup_key=["rounded_pickup_datetime"],
+        table_name=account_features_table,
+        lookup_key=["account_id"],
     ),
 ]
 
-dropoff_feature_lookups = [
+# Delinquency history features
+delinquency_feature_lookups = [
     FeatureLookup(
-        table_name=dropoff_features_table,
-        feature_names=["count_trips_window_30m_dropoff_zip", "dropoff_is_weekend"],
-        lookup_key=["dropoff_zip"],
-        timestamp_lookup_key=["rounded_dropoff_datetime"],
+        table_name=delinquency_features_table,
+        lookup_key=["account_id"],
+    ),
+]
+
+# Payment behavior features
+payment_feature_lookups = [
+    FeatureLookup(
+        table_name=payment_features_table,
+        lookup_key=["account_id"],
     ),
 ]
 
@@ -205,18 +187,16 @@ mlflow.end_run()
 # Start an mlflow run, which is needed for the feature store to log the model
 mlflow.start_run()
 
-# Since the rounded timestamp columns would likely cause the model to overfit the data
-# unless additional feature engineering was performed, exclude them to avoid training on them.
-exclude_columns = ["rounded_pickup_datetime", "rounded_dropoff_datetime"]
+# Columns to exclude from training (IDs, dates, etc.)
+exclude_columns = ["account_open_date", "bank"]
 
 fe = FeatureEngineeringClient()
 
-# Create the training set that includes the raw input data merged with corresponding features from both feature tables
+# Create the training set that includes the raw input data merged with corresponding features from all feature tables
 training_set = fe.create_training_set(
-    df=taxi_data, # specify the df 
-    feature_lookups=pickup_feature_lookups + dropoff_feature_lookups, 
-    # both features need to be available; defined in GenerateAndWriteFeatures &/or feature-engineering-workflow-resource.yml
-    label="fare_amount",
+    df=training_data,
+    feature_lookups=account_feature_lookups + delinquency_feature_lookups + payment_feature_lookups,
+    label="default_12m",  # Binary target: 0 = no default, 1 = default
     exclude_columns=exclude_columns,
 )
 
@@ -226,13 +206,20 @@ training_df = training_set.load_df()
 
 # COMMAND ----------
 
-# Display the training dataframe, and note that it contains both the raw input data and the features from the Feature Store, like `dropoff_is_weekend`
+# Display the training dataframe with features from Feature Store
+print(f"Training dataframe columns: {training_df.columns}")
+print(f"Training dataframe shape: {training_df.count()} rows, {len(training_df.columns)} columns")
 training_df.display()
 
 # COMMAND ----------
 
+# Check class distribution
+training_df.groupBy("default_12m").count().display()
+
+# COMMAND ----------
+
 # MAGIC %md
-# MAGIC Train a LightGBM model on the data returned by `TrainingSet.to_df`, then log the model with `FeatureStoreClient.log_model`. The model will be packaged with feature metadata.
+# MAGIC Train a LightGBM binary classification model on the data returned by `TrainingSet.to_df`, then log the model with `FeatureEngineeringClient.log_model`. The model will be packaged with feature metadata.
 
 # COMMAND ----------
 
@@ -248,28 +235,50 @@ features_and_label = training_df.columns
 # Collect data into a Pandas array for training
 data = training_df.toPandas()[features_and_label]
 
-train, test = train_test_split(data, random_state=123)
-X_train = train.drop(["fare_amount"], axis=1)
-X_test = test.drop(["fare_amount"], axis=1)
-y_train = train.fare_amount
-y_test = test.fare_amount
+# Split data into train and test sets
+train, test = train_test_split(data, random_state=123, stratify=data["default_12m"])
+X_train = train.drop(["default_12m"], axis=1)
+X_test = test.drop(["default_12m"], axis=1)
+y_train = train.default_12m
+y_test = test.default_12m
+
+print(f"Training set: {len(X_train)} samples")
+print(f"Test set: {len(X_test)} samples")
+print(f"Default rate in train: {y_train.mean():.4f}")
+print(f"Default rate in test: {y_test.mean():.4f}")
 
 mlflow.lightgbm.autolog()
 train_lgb_dataset = lgb.Dataset(X_train, label=y_train.values)
 test_lgb_dataset = lgb.Dataset(X_test, label=y_test.values)
 
-param = {"num_leaves": 32, "objective": "regression", "metric": "rmse"}
+# Binary classification parameters
+param = {
+    "num_leaves": 32,
+    "objective": "binary",  # Binary classification
+    "metric": "auc",  # ROC-AUC for evaluation
+    "learning_rate": 0.1,
+    "feature_fraction": 0.8,
+    "bagging_fraction": 0.8,
+    "bagging_freq": 5,
+    "verbose": -1
+}
 num_rounds = 100
 
 # Train a lightGBM model
-model = lgb.train(param, train_lgb_dataset, num_rounds)
+model = lgb.train(
+    param,
+    train_lgb_dataset,
+    num_rounds,
+    valid_sets=[test_lgb_dataset],
+    valid_names=['test']
+)
 
 # COMMAND ----------
 
 # DBTITLE 1, Log model and return output.
 # Log the trained model with MLflow and package it with feature lookup information.
 fe.log_model(
-    model=model, #specify model
+    model=model,
     artifact_path="model_packaged",
     flavor=mlflow.lightgbm,
     training_set=training_set,
