@@ -1,7 +1,7 @@
 # Databricks notebook source
 ##################################################################################
 # Model Training Notebook using Databricks Feature Store
-#
+# Adding a new comment into the notebook to check the end-to-end flow
 # This notebook shows an example of a Model Training pipeline for Home Loan Default Prediction
 # using Databricks Feature Store tables.
 # It is configured and can be executed as the "Train" task in the model_training_job workflow defined under
