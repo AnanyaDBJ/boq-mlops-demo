@@ -4,6 +4,7 @@
 #
 # This notebook can be used to generate and write features to a Databricks Feature Store table.
 # It is configured and can be executed as the tasks in the feature_engineering_job workflow defined under
+# sample change
 # ``boq_mlops_project/resources/feature-engineering-workflow-resource.yml``
 #
 # Parameters:
